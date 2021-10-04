@@ -5,8 +5,8 @@
   "bot_name":"GSL Ticket bot",
   "emoji":"",
   "color":"",
-  "ticket_limit":"1",
+  "ticket_limit":"2",
   "support_role_id":"",
-  "category_id":"",
+  "category_id":"780119896893161522",
   "log_channel_id":""
 }
