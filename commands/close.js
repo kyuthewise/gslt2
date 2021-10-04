@@ -1,86 +1,297 @@
-const Discord = require('discord.js');
-const db = require('quick.db');
-const date = require('date-and-time')
-const hastebin = require('hastebin')
+const Command = require('../modules/commands/command');
+const {
+	Interaction, // eslint-disable-line no-unused-vars
+	MessageActionRow,
+	MessageButton,
+	MessageEmbed
+} = require('discord.js');
+const { Op } = require('sequelize');
+const ms = require('ms');
 
-module.exports.run = async (bot, message, args) => {
-    if(!message.content.startsWith('ticket.'))return;  
+module.exports = class CloseCommand extends Command {
+	constructor(client) {
+		const i18n = client.i18n.getLocale(client.config.locale);
+		super(client, {
+			description: i18n('commands.close.description'),
+			internal: true,
+			name: i18n('commands.close.name'),
+			options: [
+				{
+					description: i18n('commands.close.options.reason.description'),
+					name: i18n('commands.close.options.reason.name'),
+					required: false,
+					type: Command.option_types.STRING
+				},
+				{
+					description: i18n('commands.close.options.ticket.description'),
+					name: i18n('commands.close.options.ticket.name'),
+					required: false,
+					type: Command.option_types.INTEGER
+				},
+				{
+					description: i18n('commands.close.options.time.description'),
+					name: i18n('commands.close.options.time.name'),
+					required: false,
+					type: Command.option_types.STRING
+				}
+			]
+		});
+	}
 
-  let channel = message.channel;
+	/**
+	 * @param {Interaction} interaction
+	 * @returns {Promise<void|any>}
+	 */
+	async execute(interaction) {
+		const settings = await this.client.utils.getSettings(interaction.guild.id);
+		const default_i18n = this.client.i18n.getLocale(this.client.config.defaults.locale);  // command properties could be in a different locale
+		const i18n = this.client.i18n.getLocale(settings.locale);
 
-  let whoopsembed = new Discord.RichEmbed()
-  .setColor('#e64b0e')
-  .setDescription(`Ticket Is Already Closed`)
+		const reason = interaction.options.getString(default_i18n('commands.close.options.reason.name'));
+		const ticket = interaction.options.getInteger(default_i18n('commands.close.options.ticket.name'));
+		const time = interaction.options.getString(default_i18n('commands.close.options.time.name'));
 
-  if(channel.parent == message.guild.channels.find(c => c.name == "Closed Tickets" && c.type == "category")) return message.channel.send(whoopsembed)
+		if (time) {
+			let period;
+			try {
+				period = ms(time);
+			} catch {
+				return await interaction.reply({
+					embeds: [
+						new MessageEmbed()
+							.setColor(settings.error_colour)
+							.setTitle(i18n('commands.close.response.invalid_time.title'))
+							.setDescription(i18n('commands.close.response.invalid_time.description'))
+							.setFooter(settings.footer, interaction.guild.iconURL())
+					],
+					ephemeral: true
+				});
+			}
+			const tickets = await this.client.db.models.Ticket.findAndCountAll({
+				where: {
+					guild: interaction.guild.id,
+					last_message: { [Op.lte]: new Date(Date.now() - period) },
+					open: true
+				}
+			});
 
-    let ticketcount = db.fetch(`${message.guild.id}-ticketcount`)
-  let ticketchannel = db.fetch(`${message.guild.id}_${message.author.id}-channelID`)
-
-  let reason = args.join(" ");
-
-  if(!reason) reason = 'None Provided'
-
-  db.set(`${message.guild.id}_${message.author.id}-closeticketreason`, reason)
-
-  let reasonfetch = db.fetch(`${message.guild.id}_${message.author.id}-closeticketreason`)
-
-  let user = db.fetch(`${message.guild.id}_${message.author.id}-ticketopener`)
-  
-  message.channel.fetchMessages()
-  .then(messages => {
-    let text = "";
-
-  for (let [key, value] of messages) {
-        const now = new Date();
-      let dateString = `${date.format(now, 'YYYY/MM/DD HH:mm:ss', true)}`;
-
-      text += `${dateString} | ${value.author.tag}: ${value.content}\n`;
-  }
-
-  hastebin.createPaste(text, {
-          raw: true,
-          contentType: 'text/plain',
-          server: 'https://hastebin.com'
-
-      })
-      .then(data => {
-          console.log(`Created paste: ${data}`);
-          
-          db.set(`${message.guild.id}_${user.id}-transcript`, data)
-          
-          let authorsend = new Discord.RichEmbed()
-          .setColor('#e64b0e')
-          .setDescription(`[Message Transcript](${data}) Of Your Ticket In ${message.guild.name}`)
-
-          let closedticket = new Discord.RichEmbed()
-          .setColor('#e64b0e')
-          .setDescription(`Ticket Closed & Moved To Closed Tickets. This Ticket Will Be Deleted In 10 Minutes\n\n[Ticket Transcript](${data}) Or Run \`ticket.last\` To Get Additional Info`)
+			if (tickets.count === 0) {
+				return await interaction.reply({
+					embeds: [
+						new MessageEmbed()
+							.setColor(settings.error_colour)
+							.setTitle(i18n('commands.close.response.no_tickets.title'))
+							.setDescription(i18n('commands.close.response.no_tickets.description'))
+							.setFooter(settings.footer, interaction.guild.iconURL())
+					],
+					ephemeral: true
+				});
+			} else {
+				await interaction.reply({
+					components: [
+						new MessageActionRow()
+							.addComponents(
+								new MessageButton()
+									.setCustomId(`confirm_close_multiple:${interaction.id}`)
+									.setLabel(i18n('commands.close.response.confirm_multiple.buttons.confirm', tickets.count, tickets.count))
+									.setEmoji('✅')
+									.setStyle('SUCCESS')
+							)
+							.addComponents(
+								new MessageButton()
+									.setCustomId(`cancel_close_multiple:${interaction.id}`)
+									.setLabel(i18n('commands.close.response.confirm_multiple.buttons.cancel'))
+									.setEmoji('❌')
+									.setStyle('SECONDARY')
+							)
+					],
+					embeds: [
+						new MessageEmbed()
+							.setColor(settings.colour)
+							.setTitle(i18n('commands.close.response.confirm_multiple.title'))
+							.setDescription(i18n('commands.close.response.confirm_multiple.description', tickets.count, tickets.count))
+							.setFooter(this.client.utils.footer(settings.footer, i18n('collector_expires_in', 30)), interaction.guild.iconURL())
+					],
+					ephemeral: true
+				});
 
 
-    let channeldelete = message.guild.channels.get(ticketchannel)
-    let category = message.guild.channels.find(c => c.name == "Closed Tickets" && c.type == "category")
+				const filter = i => i.user.id === interaction.user.id && i.customId.includes(interaction.id);
+				const collector = interaction.channel.createMessageComponentCollector({
+					filter,
+					time: 30000
+				});
 
-    if(category) channeldelete.setParent(category.id) 
+				collector.on('collect', async i => {
+					await i.deferUpdate();
+
+					if (i.customId === `confirm_close_multiple:${interaction.id}`) {
+						for (const ticket of tickets.rows) {
+							await this.client.tickets.close(ticket.id, interaction.user.id, interaction.guild.id, reason);
+						}
+
+						await i.editReply({
+							components: [],
+							embeds: [
+								new MessageEmbed()
+									.setColor(settings.success_colour)
+									.setTitle(i18n('commands.close.response.closed_multiple.title', tickets.count, tickets.count))
+									.setDescription(i18n('commands.close.response.closed_multiple.description', tickets.count, tickets.count))
+									.setFooter(settings.footer, interaction.guild.iconURL())
+							],
+							ephemeral: true
+						});
+					} else {
+						await i.editReply({
+							components: [],
+							embeds: [
+								new MessageEmbed()
+									.setColor(settings.error_colour)
+									.setTitle(i18n('commands.close.response.canceled.title'))
+									.setDescription(i18n('commands.close.response.canceled.description'))
+									.setFooter(settings.footer, interaction.guild.iconURL())
+							],
+							ephemeral: true
+						});
+					}
+
+					collector.stop();
+				});
+
+				collector.on('end', async collected => {
+					if (collected.size === 0) {
+						await interaction.editReply({
+							components: [],
+							embeds: [
+								new MessageEmbed()
+									.setColor(settings.error_colour)
+									.setAuthor(interaction.user.username, interaction.user.displayAvatarURL())
+									.setTitle(i18n('commands.close.response.confirmation_timeout.title'))
+									.setDescription(i18n('commands.close.response.confirmation_timeout.description'))
+									.setFooter(settings.footer, interaction.guild.iconURL())
+							],
+							ephemeral: true
+						});
+					}
+				});
+			}
+		} else {
+
+			let t_row;
+			if (ticket) {
+				t_row = await this.client.tickets.resolve(ticket, interaction.guild.id);
+				if (!t_row) {
+					return await interaction.reply({
+						embeds: [
+							new MessageEmbed()
+								.setColor(settings.error_colour)
+								.setTitle(i18n('commands.close.response.unresolvable.title'))
+								.setDescription(i18n('commands.close.response.unresolvable.description', ticket))
+								.setFooter(settings.footer, interaction.guild.iconURL())
+						],
+						ephemeral: true
+					});
+				}
+			} else {
+				t_row = await this.client.db.models.Ticket.findOne({ where: { id: interaction.channel.id } });
+				if (!t_row) {
+					return await interaction.reply({
+						embeds: [
+							new MessageEmbed()
+								.setColor(settings.error_colour)
+								.setTitle(i18n('commands.close.response.not_a_ticket.title'))
+								.setDescription(i18n('commands.close.response.not_a_ticket.description'))
+								.setFooter(settings.footer, interaction.guild.iconURL())
+						],
+						ephemeral: true
+					});
+				}
+			}
+
+			await interaction.reply({
+				components: [
+					new MessageActionRow()
+						.addComponents(
+							new MessageButton()
+								.setCustomId(`confirm_close:${interaction.id}`)
+								.setLabel(i18n('commands.close.response.confirm.buttons.confirm'))
+								.setEmoji('✅')
+								.setStyle('SUCCESS')
+						)
+						.addComponents(
+							new MessageButton()
+								.setCustomId(`cancel_close:${interaction.id}`)
+								.setLabel(i18n('commands.close.response.confirm.buttons.cancel'))
+								.setEmoji('❌')
+								.setStyle('SECONDARY')
+						)
+				],
+				embeds: [
+					new MessageEmbed()
+						.setColor(settings.colour)
+						.setTitle(i18n('commands.close.response.confirm.title'))
+						.setDescription(settings.log_messages ? i18n('commands.close.response.confirm.description_with_archive') : i18n('commands.close.response.confirm.description'))
+						.setFooter(this.client.utils.footer(settings.footer, i18n('collector_expires_in', 30)), interaction.guild.iconURL())
+				],
+				ephemeral: true
+			});
 
 
-    let logchannelembed = new Discord.RichEmbed()
-    .setColor('#e64b0e')
-    .setTitle(`Ticket Closed`)
-    .setDescription(`Closed By: ${message.author}\nTicket Number: \`${ticketcount}\`\nClose Reason: \`${reasonfetch}\`\nTranscript: [Here](${data})`)
+			const filter = i => i.user.id === interaction.user.id && i.customId.includes(interaction.id);
+			const collector = interaction.channel.createMessageComponentCollector({
+				filter,
+				time: 30000
+			});
 
-    let logchannel = message.guild.channels.find(cl => cl.name == "ticket-logs" && cl.type == "text")
-    logchannel.send(logchannelembed)  
-    message.channel.send(closedticket)
+			collector.on('collect', async i => {
+				await i.deferUpdate();
 
-        setTimeout(() => {
-          channeldelete.delete()
-        }, 600000);
+				if (i.customId === `confirm_close:${interaction.id}`) {
+					await this.client.tickets.close(t_row.id, interaction.user.id, interaction.guild.id, reason);
+					await i.editReply({
+						components: [],
+						embeds: [
+							new MessageEmbed()
+								.setColor(settings.success_colour)
+								.setTitle(i18n('commands.close.response.closed.title', t_row.number))
+								.setDescription(i18n('commands.close.response.closed.description', t_row.number))
+								.setFooter(settings.footer, interaction.guild.iconURL())
+						],
+						ephemeral: true
+					});
+				} else {
+					await i.editReply({
+						components: [],
+						embeds: [
+							new MessageEmbed()
+								.setColor(settings.error_colour)
+								.setTitle(i18n('commands.close.response.canceled.title'))
+								.setDescription(i18n('commands.close.response.canceled.description'))
+								.setFooter(settings.footer, interaction.guild.iconURL())
+						],
+						ephemeral: true
+					});
+				}
 
-      })
-})
-}     
-module.exports.help = {
-    name:"close",
-    aliases: ["cl"]
-  }
+				collector.stop();
+			});
+
+			collector.on('end', async collected => {
+				if (collected.size === 0) {
+					await interaction.editReply({
+						components: [],
+						embeds: [
+							new MessageEmbed()
+								.setColor(settings.error_colour)
+								.setAuthor(interaction.user.username, interaction.user.displayAvatarURL())
+								.setTitle(i18n('commands.close.response.confirmation_timeout.title'))
+								.setDescription(i18n('commands.close.response.confirmation_timeout.description'))
+								.setFooter(settings.footer, interaction.guild.iconURL())
+						],
+						ephemeral: true
+					});
+				}
+			});
+		}
+	}
+};
