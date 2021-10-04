@@ -1,49 +1,31 @@
-const Command = require('../modules/commands/command');
-const {
-	Interaction, // eslint-disable-line no-unused-vars
-	MessageEmbed
-} = require('discord.js');
+const Discord = require('discord.js')
 
-module.exports = class HelpCommand extends Command {
-	constructor(client) {
-		const i18n = client.i18n.getLocale(client.config.locale);
-		super(client, {
-			description: i18n('commands.help.description'),
-			internal: true,
-			name: i18n('commands.help.name')
-		});
-	}
 
-	/**
-	 * @param {Interaction} interaction
-	 * @returns {Promise<void|any>}
-	 */
-	async execute(interaction) {
-		const settings = await this.client.utils.getSettings(interaction.guild.id);
-		const i18n = this.client.i18n.getLocale(settings.locale);
+module.exports.run = async (bot, message, args) => {
+    if(!message.content.startsWith('ticket.'))return;  
 
-		const is_staff = await this.client.utils.isStaff(interaction.member);
-		const commands = this.manager.commands.filter(command => {
-			if (command.permissions.length >= 1) return interaction.member.permissions.has(command.permissions);
-			else if (command.staff_only) return is_staff;
-			else return true;
-		});
-		const list = commands.map(command => {
-			const description = command.description.length > 50
-				? command.description.substring(0, 50) + '...'
-				: command.description;
-			return `**\`/${command.name}\` ·** ${description}`;
-		});
-		return await interaction.reply({
-			embeds: [
-				new MessageEmbed()
-					.setColor(settings.colour)
-					.setTitle(i18n('commands.help.response.list.title'))
-					.setDescription(i18n('commands.help.response.list.description'))
-					.addField(i18n('commands.help.response.list.fields.commands'), list.join('\n'))
-					.setFooter(settings.footer, interaction.guild.iconURL())
-			],
-			ephemeral: true
-		});
-	}
-};
+
+    let embed = new Discord.RichEmbed()
+    .setTitle("Support Tickets Help")
+    .addField("Creating a Ticket [Alias: cr]", "`ticket.create`")
+    .addField("Closing a Ticket [Alias: cl]", "`ticket.close [reason]`")
+    .addField("Adding a User To The Ticket [Alias: a]", "`ticket.add [usermention]`")
+    .addField("Removing a User From The Ticket [Alias: r]", "`ticket.remove [usermention]`")
+    .addField("Last Ticket Information [Alias: lt]", "`ticket.last`")
+    .addField("ADMIN | Force Closing The Ticket [Alias: fc]", "`ticket.forceclose [reason]`")
+    .addField("ADMIN | Rename a Ticket [Alias: rn]", "`ticket.rename [name]`")
+    .addField("ADMIN | Timing Out a Ticket [Alias: to]", "`ticket.timeout`")
+    .addField("ADMIN | Setting Up Ticket Topics [Alias: s]", "`ticket.set [1 - 5] [Topic]`")
+    .addField("ADMIN | Setting Up The Server [Alias: su]", "`ticket.setup`")
+    .setColor("#e64b0e")
+    message.channel.send(embed)
+
+
+
+
+}
+
+module.exports.help = {
+  name:"help",
+  aliases: [""]
+}
