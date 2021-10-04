@@ -1,2 +1,2 @@
-Worker: node .eslintrc.js
-Worker: node index.js
+
+Worker: node ./src/index.js
